@@ -22,6 +22,11 @@ class RatOSHoming:
         self.gcode = self.printer.lookup_object('gcode')
         self.prev_G28 = self.gcode.register_command("G28", None)
         self.gcode.register_command("G28", self.cmd_G28)
+		#register a traditional command, i.e. one that does not expect parameters with equal sign. If we registered a modern command
+		#the gcode handler (prev_G28) would not know how to handle the parameters, and we would need to build the command anew, with all 
+		#the error handling.
+        self.gcode.register_command("G2800", self.prev_G28)
+
     def cmd_G28(self, gcmd):
         if self.in_script:
             # Was called recursively - invoke the real G28 command

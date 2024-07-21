@@ -13,7 +13,7 @@ class SensorlessHomingTune:
         self.printer = config.get_printer()
         self.gcode = self.printer.lookup_object('gcode')
         self.axis = None
-        self.backtrack_amount = config.getfloat('backtrack_amount', 5.0)
+        self.backtrack_from_premature = config.getfloat('backtrack_from_premature', 5.0)
         self.backtrack_to_mid = config.getfloat('backtrack_to_mid', 150.0)
         self.timeout = config.getfloat('timeout', 15.0)
         self.highest_successful_threshold = None
@@ -27,22 +27,33 @@ class SensorlessHomingTune:
                
     def cmd_sensorless_tune(self, gcmd):
         self.axis = gcmd.get('AXES').upper()
-        if self.axis not in ['X', 'Y']:
-            raise self.gcode.error("Invalid AXES parameter, must be 'X' or 'Y'")
-
+        if self.axis not in ['X']: #handling Y would mean we'd need to think about directions properly
+            raise self.gcode.error("Invalid AXES parameter, must be 'X'")
+        
+        if self.axis == 'X':
+            current = 0.6
+        else:
+            current = 0.9
+            
+        self.gcode.run_script_from_command(f"SET_TMC_CURRENT STEPPER=stepper_x CURRENT={current}")
+        self.gcode.run_script_from_command(f"SET_TMC_CURRENT STEPPER=stepper_y CURRENT={current}")
+        
         rangeHigh = 255
         rangeLow = 0
         time_min = 1
         time_max = 10
-        while rangeHigh > rangeLow:
+        highestSuccessfulThreshold = 0
+        while rangeHigh >= rangeLow:
             threshold = (rangeHigh + rangeLow) // 2
             r = self._try_homing(self.axis, threshold, time_min, time_max)
             if r == HomingState.Homing_premature:  # Value was too high. Reduce Max
                 rangeHigh = threshold - 1
-                self._backtrack_head(self.backtrack_amount)
+                self._backtrack_head(self.backtrack_from_premature)
             else:  # It was low enough, and we either succeeded or timed out. Let us still try higher values
                 if r == HomingState.Homing_timeout:  # Timed out, so we assume we are at the left rail
                     self.gcode.run_script_from_command(f"SET_KINEMATIC_POSITION {self.axis}=0")
+                else:
+                    highestSuccessfulThreshold = threshold
                 rangeLow = threshold + 1
                 self._backtrack_head(self.backtrack_to_mid)
         self.printInfo(f"Highest threshold: {threshold}")
@@ -54,13 +65,13 @@ class SensorlessHomingTune:
             if r == HomingState.Homing_timeout:  # Value was too low, need to increase
                 rangeLow = threshold + 1
                 self.gcode.run_script_from_command(f"SET_KINEMATIC_POSITION {self.axis}=0")
-                self._backtrack_head(self.backtrack_amount)
+                self._backtrack_head(self.backtrack_from_premature)
             else:  # It was still high enough, and we either succeeded or were premature. Let us still try lower values
                 rangeHigh = threshold -1
                 if r == HomingState.Homing_adequate:
                     self._backtrack_head(self.backtrack_to_mid)
                 else:
-                    self._backtrack_head(self.backtrack_amount)
+                    self._backtrack_head(self.backtrack_from_premature)
         self.printInfo(f"Lowest threshold: {threshold}")
 		
  
